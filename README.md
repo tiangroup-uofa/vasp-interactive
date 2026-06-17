@@ -10,9 +10,9 @@
 [![Perlmutter GPU test](https://github.com/ulissigroup/vasp-interactive/actions/workflows/perlmutter_gpu_status.yaml/badge.svg)](https://github.com/ulissigroup/vasp-interactive/actions/workflows/perlmutter_gpu_status.yaml)
 [![Perlmutter Shifter (CPU)](https://github.com/ulissigroup/vasp-interactive/actions/workflows/perlmutter_shifter_status.yml/badge.svg)](https://github.com/ulissigroup/vasp-interactive/actions/workflows/perlmutter_shifter_status.yml)
 
-> [!IMPORTANT]
+> [!CAUTION]
 > This repository is being frozen and will no longer be actively maintained here.
-> For ongoing maintenance and future development, please refer to the `tiangroup-uofa` fork of `vasp-interactive`.
+> For ongoing maintenance and development, please go to the forked repository [`tiangroup-uofa/vasp-interactive`](https://github.com/tiangroup-uofa/vasp-interactive)
 
 # TL;DR
 
