@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vasp-interactive"
+version = "0.1.0rc0"
+description = "A stream-based ASE calculator for VASP interactive mode"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+dependencies = [
+    "ase>=3.24",
+    "psutil>5.0.0",
+]
+
+[project.entry-points."ase.plugins"]
+vasp-interactive = "vasp_interactive.ase_plugin"
+
+[tool.setuptools.packages.find]
+include = ["vasp_interactive*"]
