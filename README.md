@@ -365,6 +365,7 @@ If you want to specify the source of your results on each ionic step, consider u
 - [examples/ex05_rattle_atoms.py](examples/ex05_rattle_atoms.py): Apply `VaspInteractive` to sequence of structures (same formula, different positions)
 - [examples/ex06_benchmark.py](examples/ex06_benchmark.py) and [examples/ex07_benchmark.py](examples/ex07_benchmark.py): Running benchmark. You can delete `examples/benchmark.pkl` and `examples/benchmark-large.pkl` if you want to re-run the calculations (may take up to a few hours).
 - [examples/ex08_dask_par.py](examples/ex08_dask_par.py): Simple example running parallel relaxation jobs using Dask. See `examples/ex08_sample_output.txt` for an example of output.
+- [examples/ex18_vasp642_socket_lbfgs.py](examples/ex18_vasp642_socket_lbfgs.py): H20-validated VASP 6.4.2 fixed-cell ASE socket/LBFGS acceptance example; see [docs/vasp642_socket_fixed_cell.md](docs/vasp642_socket_fixed_cell.md).
 <!-- - [examples/ex10_mlp_online.py](examples/ex10_mlp_online.py): Example with online machine learning potential (`al_mlp` + `amptorch`).
  -->
  
