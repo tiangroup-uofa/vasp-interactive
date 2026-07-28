@@ -67,7 +67,14 @@ def _find_mpi_process(pid, mpi_program="mpirun", vasp_program="vasp_std"):
 
     If srun is found as the process, need to use `scancel` to pause / resume the job step
     """
-    allowed_names = set(["mpirun", "mpiexec", "orterun", "oshrun", "shmemrun"])
+    allowed_names = set([
+        "mpirun",
+        "mpiexec",
+        "orterun",
+        "prterun",
+        "oshrun",
+        "shmemrun",
+    ])
     allowed_vasp_names = set(["vasp_std", "vasp_gam", "vasp_ncl"])
     if mpi_program:
         allowed_names.add(mpi_program)
@@ -94,12 +101,10 @@ def _find_mpi_process(pid, mpi_program="mpirun", vasp_program="vasp_std"):
             match["type"] = "slurm"
             match["process"] = _locate_slurm_step(vasp_program=vasp_program)
             break
-        elif proc.name() in allowed_names:
-            # is the mpi process's direct children are vasp_std?
-            children = proc.children()
-            if len(children) > 0:
-                if children[0].name() in allowed_vasp_names:
-                    mpi_candidates.append(proc)
+        elif name in allowed_names:
+            children = proc.children(recursive=True)
+            if any(child.name() in allowed_vasp_names for child in children):
+                mpi_candidates.append(proc)
     if len(mpi_candidates) > 1:
         warn(
             "More than 1 mpi processes are created. This may be a bug. I'll use the last one"

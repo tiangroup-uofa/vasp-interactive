@@ -82,8 +82,8 @@ class VaspInteractive(Vasp):
         "interactive": True,
         # Disable stopping criteria but just rely on nsw
         "ediffg": 0,
-        # Set ISIF tag to cature stress-induced energy change
-        "isif": 3,
+        # Fixed-cell external relaxations only need forces; avoid VASP requesting lattice stdin.
+        "isif": 2,
     }
     # Enforce the job to run infinitely untill killed
     default_input = {
@@ -261,7 +261,6 @@ class VaspInteractive(Vasp):
                 unixsocket=unixsocket,
                 timeout=timeout,
                 log=log,
-                comm=None,
             )
             self.socket_client.attach_parent_calc(self)
         else:
@@ -455,20 +454,19 @@ class VaspInteractive(Vasp):
         # use scaled positions wrap back to cell
         for atom in atoms.get_scaled_positions()[self.sort]:
             self._stdin(" ".join(map("{:19.16f}".format, atom)), out=None)
-        # INPOS subroutine does not split the positions, so manually write into vasp.out
-        self._stdout("New scaled positions\n", out=out)
-        for i in range(len(atoms)):
-            self._stdout(self.process.stdout.readline(), out=out)
-        self._stdout("Old scaled positions\n", out=out)
-        for i in range(len(atoms)):
-            self._stdout(self.process.stdout.readline(), out=out)
+        # Different VASP builds echo different amounts of position data here.
+        # Read until the explicit synchronization marker instead of assuming
+        # 2 * natoms echo lines.
+        while True:
+            text = self.process.stdout.readline()
+            self._stdout(text, out=out)
+            if "POSITIONS: read from stdin" in text:
+                break
+            if text == "":
+                raise RuntimeError("VASP stdout closed before POSITIONS were acknowledged")
 
-        # An additional line "POSITIONS: read from stdin"
-        text = self.process.stdout.readline()
-        self._stdout(text, out=out)
-        assert "POSITIONS: read from stdin" in text
-
-        # Determine if lattice input is needed
+        # Determine if lattice input is needed.  This look-ahead may also be
+        # the first line of the next electronic step (e.g. bond charge predicted).
         text = self.process.stdout.readline()
         self._stdout(text, out=out)
         if "LATTICE: reading from stdin" in text:
@@ -529,7 +527,7 @@ class VaspInteractive(Vasp):
                             "If you encounter similar error messages, try using VASP 6.x or apply our patch if possible."
                         )
                     )
-            if "POSITIONS: reading from stdin" in text:
+            if "POSITIONS: reading from stdin" in text or "POSITIONS AND LATTICE: reading from stdin" in text:
                 return
 
         # 4. VASP process exits. Check if everything's running ok
@@ -575,8 +573,17 @@ class VaspInteractive(Vasp):
             # For whatever reason the vasp process stops prematurely (possibly too small nsw)
             # do a clean up
             retcode = self.process.poll()
+            stderr_text = ""
+            if getattr(self.process, "stderr", None) is not None:
+                try:
+                    stderr_text = self.process.stderr.read()
+                except Exception:
+                    stderr_text = ""
             with self._txt_outstream() as out:
                 self._stdout(f"VASP exited with code {retcode}.", out=out)
+                if stderr_text:
+                    self._stdout("\n--- VASP stderr ---\n", out=out)
+                    self._stdout(stderr_text, out=out)
             self._reset_process()
         elif self._use_mlff():
             # Send only SIGINT to process to terminate.
@@ -630,8 +637,14 @@ class VaspInteractive(Vasp):
             self.mpi_match = match
         if (match["type"] is None) or (match["process"] is None):
             warn(
-                "Cannot find the mpi process or you're using different ompi wrapper. Will not send stop signal to mpi."
+                "Cannot find the mpi process or you're using different ompi wrapper. "
+                "Will send the signal to the launcher process instead."
             )
+            try:
+                psutil_proc.send_signal(sig)
+            except Exception:
+                if self.process is not None:
+                    self.process.send_signal(sig)
             return
         elif match["type"] == "mpi":
             mpi_process = match["process"]

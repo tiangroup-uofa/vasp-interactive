@@ -33,7 +33,7 @@ def _get_incar_params(calcdir):
     dummy_vp.read_incar(dummy_vp._indir("INCAR"))
     f_kpts = Path(dummy_vp._indir("KPOINTS"))
     if f_kpts.is_file():
-        dummy_vp.read_incar(dummy_vp._indir("KPOINTS"))
+        dummy_vp.read_kpoints(dummy_vp._indir("KPOINTS"))
     vasp_inputs = dummy_vp.asdict()["inputs"]
     return vasp_inputs
 
