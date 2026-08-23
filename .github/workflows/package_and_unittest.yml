@@ -2,13 +2,8 @@
 # All python unittests should be relatively fast (1 core + gam)
 name: Ulissigroup docker image
 
+# Legacy Ulissigroup-image workflow. Manual dispatch only.
 on:
-  push:
-    branches: [ main ]
-    paths-ignore:
-      - '**.md'
-      - 'examples/**'
-      - 'tutorials/**'
   workflow_dispatch:
 
 jobs:
