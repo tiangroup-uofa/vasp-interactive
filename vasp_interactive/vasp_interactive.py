@@ -11,6 +11,7 @@ import os
 import re
 import psutil
 import sys
+from io import StringIO
 from pathlib import Path
 from warnings import warn
 from subprocess import Popen, PIPE
@@ -25,6 +26,7 @@ from ase.calculators.calculator import (
     all_changes,
 )
 from ase.calculators.vasp.vasp import Vasp, check_atoms
+from ase.io.vasp import write_vasp
 from ase.calculators.singlepoint import SinglePointDFTCalculator, SinglePointCalculator
 from ase.calculators.socketio import SocketClient
 
@@ -475,41 +477,33 @@ class VaspInteractive(Vasp):
                     f"VASP exited before writing the expected marker {marker!r}."
                 )
 
-    def _atom_counts_for_stdin(self, atoms):
-        """Return atom counts in the ordering used by VASP's POSCAR reader."""
-        symbol_count = getattr(self, "symbol_count", None)
-        if symbol_count:
-            return [int(count) for _, count in symbol_count]
-
-        # This fallback is useful for direct unit tests that do not call
-        # Vasp.write_input() first.  Normal calculations use symbol_count,
-        # which also handles ASE special setups correctly.
-        sort = getattr(self, "sort", list(range(len(atoms))))
-        symbols = [atoms[index].symbol for index in sort]
-        counts = []
-        previous = None
-        for symbol in symbols:
-            if symbol != previous:
-                counts.append(1)
-                previous = symbol
-            else:
-                counts[-1] += 1
-        return counts
-
     def _write_full_poscar_stdin(self, atoms, out):
-        """Write the POSCAR-like record expected by VASP 6.4+ ``INPOS``."""
-        self._stdout("Inputting positions and lattice...\n", out=out)
-        self._stdin("VaspInteractive", out=None)
-        self._stdin("1.0", out=None)
-        for vec in atoms.cell:
-            self._stdin(" ".join(map("{:19.16f}".format, vec)), out=None)
-        self._stdin(
-            " ".join(str(count) for count in self._atom_counts_for_stdin(atoms)),
-            out=None,
+        """Write an ASE-standard POSCAR record accepted by VASP 6.4+.
+
+        VASP's interactive ``INPOS`` reader accepts the standard POSCAR
+        structure, but not selective-dynamics flags or a velocity section.
+        The sorted copy and explicit options below preserve ASE/VASP ordering
+        while emitting only the supported portion of the format.
+        """
+        sorted_atoms = atoms[self.sort]
+        if sorted_atoms.has("momenta"):
+            sorted_atoms = sorted_atoms.copy()
+            del sorted_atoms.arrays["momenta"]
+
+        poscar = StringIO()
+        write_vasp(
+            poscar,
+            sorted_atoms,
+            direct=True,
+            sort=False,
+            symbol_count=getattr(self, "symbol_count", None),
+            vasp5=True,
+            ignore_constraints=True,
         )
-        self._stdin("Direct", out=None)
-        for atom in atoms.get_scaled_positions()[self.sort]:
-            self._stdin(" ".join(map("{:19.16f}".format, atom)), out=None)
+
+        self._stdout("Inputting positions and lattice...\n", out=out)
+        for line in poscar.getvalue().splitlines():
+            self._stdin(line, out=None)
 
         self._read_until_stdout(
             "POSITIONS AND LATTICE: read from stdin", out=out

@@ -93,18 +93,21 @@ class MockVaspProcess:
             if len(self.received[-1].split()) != 3:
                 raise AssertionError("POSCAR lattice line is invalid")
         elif index == 5:
+            if not self.received[-1].strip():
+                raise AssertionError("POSCAR species line is empty")
+        elif index == 6:
             if tuple(int(value) for value in self.received[-1].split()) != self.counts:
                 raise AssertionError("POSCAR atom counts are invalid")
-        elif index == 6:
+        elif index == 7:
             if self.received[-1].lower() != "direct":
                 raise AssertionError("POSCAR coordinate mode is invalid")
-        elif 7 <= index < 7 + self.n_atoms:
+        elif 8 <= index < 8 + self.n_atoms:
             if len(self.received[-1].split()) != 3:
                 raise AssertionError("POSCAR position line is invalid")
         else:
             raise AssertionError("POSCAR record contains too many lines")
 
-        if len(self.received) == 7 + self.n_atoms:
+        if len(self.received) == 8 + self.n_atoms:
             self.accepted = True
             self.stdout.feed(
                 "POSITIONS AND LATTICE: read from stdin\n"
@@ -164,8 +167,8 @@ def test_64_plus_vasp_accepts_full_poscar(tmp_path, version):
         calc._write_atoms_stdin(atoms, out=None, require_cell_stdin=True)
         assert process.protocol == "poscar"
         assert process.accepted
-        assert process.received[0] == "VaspInteractive"
-        assert process.received[6] == "Direct"
-        assert len(process.received) == 10
+        assert process.received[0].strip() == "H  O"
+        assert process.received[7] == "Direct"
+        assert len(process.received) == 11
     finally:
         calc.process = None
