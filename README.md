@@ -19,6 +19,10 @@ It can be used both as a file I/O calculator and to communicate with an external
 pip install git+https://github.com/ulissigroup/vasp-interactive.git
 ```
 
+Normal installations include `psutil` for MPI process pause/resume and cleanup. In
+WASM environments, where `psutil` is unavailable, the package can still be
+imported and used for VASP I/O; ordinary MPI pause/resume is then disabled.
+
 After [setting proper environmental variables](https://databases.fysik.dtu.dk/ase/ase/calculators/vasp.html#environment-variables) 
 (e.g. `$VASP_COMMAND`, `$VASP_PP_PATH`, etc.),
 download the script and run the compatibility test with your local VASP setup:
@@ -232,7 +236,7 @@ do_some_cpu_intensive_calculation()
 
 **Notes**
 [^2]: The MPI process pause/resume has been tested on OpenMPI > 1.3.0. For some systems you may need to explicitly add the flag `--mca orte_forward_job_control 1`.
-[^3]: If your VASP commands are run by SLURM job manager's `srun` command, the signal is sent by `scancel` utility instead of forwarding to `mpirun` directly. Make sure you have access to these utilities in your environment.
+[^3]: If your VASP commands are run by SLURM job manager's `srun` command, the signal is sent by `scancel` utility instead of forwarding to `mpirun` directly. Make sure you have access to these utilities in your environment. Slurm control does not require the Python `psutil` module; other MPI launchers do.
 [^4]: Each pause/resume cycle adds an overhead of 0.5 ~ 5 s depending on your system load.
 
 

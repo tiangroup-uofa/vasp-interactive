@@ -9,7 +9,6 @@ import traceback
 import pickle
 import os
 import re
-import psutil
 import sys
 from io import StringIO
 from pathlib import Path
@@ -35,9 +34,12 @@ from .utils import (
     DEFAULT_KILL_TIMEOUT,
     _int_version,
     time_limit,
-    _find_mpi_process,
-    _slurm_signal,
     _preprocess_mlff_outcar,
+)
+from .process_control import (
+    ControllerUnavailable,
+    get_process_controller,
+    terminate_process_tree,
 )
 from .parse import (
     parse_outcar_iterations,
@@ -178,6 +180,7 @@ class VaspInteractive(Vasp):
         # self.pid tracks if pid changes (useful for stopping slurm jobs)
         self.process = None
         self.pid = None
+        self.process_controller = None
         self.allow_restart_process = allow_restart_process
 
         # Ionic steps counter. Note this number will be 1 more than that in ase.optimize
@@ -219,8 +222,7 @@ class VaspInteractive(Vasp):
 
         # Add pause function
         self.pause_mpi = allow_mpi_pause
-        # Tracker of mpi process (root proc of mpirun or slurm stepid etc)
-        # after calling _find_mpi_process, this property will become a dict cont
+        # Compatibility tracker for the selected process controller
         if self.pause_mpi:
             self.mpi_match = None
             self.mpi_state = None
@@ -431,6 +433,9 @@ class VaspInteractive(Vasp):
                 pid = self.process.pid
                 self.process = None
                 self.pid = None
+                self.process_controller = None
+                if hasattr(self, "mpi_match"):
+                    self.mpi_match = None
                 self._stdout(
                     "It seems your VASP process exited normally. I'll restart a new one.",
                     out=out,
@@ -636,6 +641,7 @@ class VaspInteractive(Vasp):
             if hasattr(self, "mpi_match"):
                 self.mpi_match = None
                 self.mpi_state = None
+            self.process_controller = None
         elif self.process.poll() is not None:
             # For whatever reason the vasp process stops prematurely (possibly too small nsw)
             # do a clean up
@@ -684,44 +690,49 @@ class VaspInteractive(Vasp):
         return
 
     def _send_mpi_signal(self, sig):
-        """Send signal to the mpi process within self.process
-        If the process cannot be found, return without affecting the state
-        """
-        # Whenever cannot locate the pid via psutil, reset the VASP process
-        try:
-            pid = self.process.pid
-            psutil_proc = psutil.Process(pid)
-        except Exception as e:
-            warn("VASP process no longer exists. Will reset the calculator.")
-            self._reset_process()
-            return
+        """Send a signal through the selected process controller.
 
-        if (self.pid == pid) and getattr(self, "mpi_match", None) is not None:
-            match = self.mpi_match
-        else:
+        A missing or unsupported controller is a safe non-paused fallback. In
+        particular, never signal the intermediate shell and report success:
+        that can leave MPI ranks running while ``mpi_state`` says PAUSED.
+        """
+        if self.process is None:
+            return False
+
+        pid = self.process.pid
+        if self.pid != pid or self.process_controller is None:
             self.pid = pid
-            match = _find_mpi_process(pid)
-            self.mpi_match = match
-        if (match["type"] is None) or (match["process"] is None):
-            warn(
-                "Cannot find the mpi process or you're using different ompi wrapper. "
-                "Will send the signal to the launcher process instead."
+            self.process_controller = get_process_controller(
+                pid,
+                command=self._vasp_command,
             )
-            try:
-                psutil_proc.send_signal(sig)
-            except Exception:
-                if self.process is not None:
-                    self.process.send_signal(sig)
-            return
-        elif match["type"] == "mpi":
-            mpi_process = match["process"]
-            mpi_process.send_signal(sig)
-        elif match["type"] == "slurm":
-            slurm_step = match["process"]
-            _slurm_signal(slurm_step, sig)
-        else:
-            raise ValueError("Unsupported process type!")
-        return
+            self.mpi_match = (
+                self.process_controller.match
+                if self.process_controller is not None
+                else None
+            )
+
+        controller = self.process_controller
+        if controller is None:
+            if sig in (signal.SIGKILL, signal.SIGTERM):
+                return terminate_process_tree(pid, process=self.process)
+            warn(
+                "No compatible process controller was found; MPI pause/resume "
+                "is disabled for this VASP process."
+            )
+            return False
+
+        try:
+            sent = controller.send_signal(sig)
+        except ControllerUnavailable as exc:
+            warn(f"{exc}; MPI pause/resume is disabled for this VASP process.")
+            return False
+        except Exception as exc:
+            warn(f"Could not signal the VASP process controller: {exc}")
+            return False
+
+        self.mpi_match = controller.match
+        return bool(sent)
 
     def _pause_calc(self, sig=signal.SIGTSTP):
         """Pause the vasp processes by sending SIGTSTP to the master mpirun process
@@ -735,8 +746,10 @@ class VaspInteractive(Vasp):
         if not self.process:
             return
 
-        self._send_mpi_signal(sig=sig)
-        self.mpi_state = "PAUSED"
+        if self._send_mpi_signal(sig=sig):
+            self.mpi_state = "PAUSED"
+        else:
+            self.mpi_state = None
         return
 
     def _resume_calc(self, sig=signal.SIGCONT):
@@ -751,8 +764,10 @@ class VaspInteractive(Vasp):
         if not self.process:
             return
 
-        self._send_mpi_signal(sig=sig)
-        self.mpi_state = "RUNNING"
+        if self._send_mpi_signal(sig=sig):
+            self.mpi_state = "RUNNING"
+        elif getattr(self, "mpi_state", None) != "PAUSED":
+            self.mpi_state = None
         return
 
     @contextmanager
@@ -764,11 +779,13 @@ class VaspInteractive(Vasp):
         This context wrapper can be disabled by setting self.pause_mpi = False
         """
         if self.pause_mpi:
+            self._pause_calc()
+            was_paused = self.mpi_state == "PAUSED"
             try:
-                self._pause_calc()
                 yield
             finally:
-                self._resume_calc()
+                if was_paused:
+                    self._resume_calc()
         else:
             # Do nothing
             yield
@@ -1119,6 +1136,7 @@ class VaspInteractive(Vasp):
         # Reset process tracker
         self.process = None
         self.pid = None
+        self.process_controller = None
         self._interactive_protocol = None
         self._pending_stdout = None
         if hasattr(self, "mpi_match"):

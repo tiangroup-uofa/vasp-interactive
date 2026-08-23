@@ -1,6 +1,7 @@
 import pytest
 
-from vasp_interactive import utils
+from vasp_interactive import process_control, utils
+from vasp_interactive.vasp_interactive import VaspInteractive
 
 
 class FakeProcess:
@@ -14,6 +15,11 @@ class FakeProcess:
 
     def name(self):
         return self._name
+
+    def send_signal(self, sig):
+        if not hasattr(self, "signals"):
+            self.signals = []
+        self.signals.append(sig)
 
     def children(self, recursive=False):
         if not recursive:
@@ -72,3 +78,56 @@ def test_srun_uses_slurm_path(monkeypatch):
         match = utils._find_mpi_process(root.pid)
 
     assert match == {"type": "slurm", "process": "12345.0"}
+
+
+def test_mpi_controller_dispatches_signal(monkeypatch):
+    root, launcher_process = install_process_tree(monkeypatch, "prte")
+
+    controller = process_control.get_process_controller(
+        root.pid, command="mpirun -np 2 vasp_std"
+    )
+
+    assert controller.kind == "mpi"
+    assert controller.send_signal(19) is True
+    assert launcher_process.signals == [19]
+
+
+def test_srun_controller_does_not_require_psutil(monkeypatch):
+    monkeypatch.setattr(utils, "psutil", None)
+    monkeypatch.setenv("SLURM_JOB_ID", "12345")
+    monkeypatch.setattr(utils, "_locate_slurm_step", lambda **kwargs: "12345.0")
+    sent = []
+    monkeypatch.setattr(
+        utils, "_slurm_signal", lambda step_id, sig: sent.append((step_id, sig))
+    )
+
+    controller = process_control.get_process_controller(999, command="srun vasp_std")
+
+    assert controller.kind == "slurm"
+    assert controller.send_signal(19) is True
+    assert sent == [("12345.0", 19)]
+
+
+def test_mpi_controller_is_unavailable_without_psutil(monkeypatch):
+    monkeypatch.setattr(utils, "psutil", None)
+
+    with pytest.warns(UserWarning, match="psutil"):
+        match = utils._find_mpi_process(999)
+    controller = process_control.get_process_controller(
+        999, command="mpirun -np 2 vasp_std"
+    )
+
+    assert match == {"type": None, "process": None}
+    assert controller is None
+
+
+def test_missing_psutil_does_not_claim_to_pause(monkeypatch):
+    monkeypatch.setattr(utils, "psutil", None)
+    calc = VaspInteractive(command="mpirun -np 2 vasp_std")
+    calc.process = FakeProcess("shell")
+
+    with pytest.warns(UserWarning):
+        calc._pause_calc()
+
+    assert calc.mpi_state is None
+    calc.process = None

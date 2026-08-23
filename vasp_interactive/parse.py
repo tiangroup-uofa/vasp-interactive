@@ -1,11 +1,6 @@
 """Functions parsing OUTCAR or vasp.out files which are not present in parent
 Vasp calculator but can he helpful for job diagnosis
 """
-import time
-import os
-import sys
-import psutil
-import signal
 import re
 import numpy as np
 

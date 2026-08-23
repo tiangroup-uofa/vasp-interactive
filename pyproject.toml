@@ -11,8 +11,11 @@ requires-python = ">=3.8"
 license = { file = "LICENSE" }
 dependencies = [
     "ase>=3.24",
-    "psutil>5.0.0",
+    "psutil>5.0.0; sys_platform != 'emscripten'",
 ]
+
+[project.optional-dependencies]
+mpi-control = ["psutil>5.0.0"]
 
 [project.entry-points."ase.plugins"]
 vasp-interactive = "vasp_interactive.ase_plugin"
