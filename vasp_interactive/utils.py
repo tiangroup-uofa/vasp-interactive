@@ -72,10 +72,16 @@ def _find_mpi_process(pid, mpi_program="mpirun", vasp_program="vasp_std"):
         "mpiexec",
         "orterun",
         "prterun",
+        "prte",
         "oshrun",
         "shmemrun",
     ])
     allowed_vasp_names = set(["vasp_std", "vasp_gam", "vasp_ncl"])
+
+    def is_vasp_process(process):
+        name = process.name()
+        return name in allowed_vasp_names or name.startswith("vasp.")
+
     if mpi_program:
         allowed_names.add(mpi_program)
     if vasp_program:
@@ -103,7 +109,7 @@ def _find_mpi_process(pid, mpi_program="mpirun", vasp_program="vasp_std"):
             break
         elif name in allowed_names:
             children = proc.children(recursive=True)
-            if any(child.name() in allowed_vasp_names for child in children):
+            if any(is_vasp_process(child) for child in children):
                 mpi_candidates.append(proc)
     if len(mpi_candidates) > 1:
         warn(
