@@ -1,10 +1,17 @@
 # Running and maintaining the Github actions
 ------
 
+> **Current status:** The active pull-request CI is the VASP-free mock protocol
+> workflow (`mock_unit_tests.yml`). The legacy VASP-binary, NERSC, and
+> Ulissigroup-image workflows are retained for historical/manual use only.
+> They are not part of the automatic CI contract. Future Tiangroup images can
+> be added as a separate, controlled workflow.
+
 ## Unit test actions involved
-- `package_and_unittest.yml`: Python lint and basic unit tests done on github action runner (VASP run with 1 core)
-- `send_job_slurm.yaml`: Use scripts under the `tests/nersc_scriptes/` to enqueue a unit test job on corresponding slurm systems (Cori Haswell, Cori KNL, Perlmutter GPU etc).
-- `*_status.yaml`: Action item only for showing the status of slurm unit test job (and update the README banner)
+- `mock_unit_tests.yml`: package installation and protocol tests with a mock VASP process; no VASP binary or POTCAR is required.
+- `package_and_unittest.yml`, `patch_test.yml`, and `coverage_test.yml`: legacy licensed-binary workflows, manual dispatch only.
+- `send_job_slurm.yaml`: legacy manual NERSC job submission workflow.
+- `*_status.yaml`: legacy manual status actions for historical Slurm jobs.
 
 Note: 
 - if ssh connection with NERSC is successful, `send_job_slurm.yaml` will always be passing

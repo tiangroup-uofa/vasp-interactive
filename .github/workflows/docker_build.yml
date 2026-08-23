@@ -1,17 +1,8 @@
 name: Build docker images (build-env & runtime)
 
 
+# Legacy builder/runtime-image workflow. Manual dispatch only.
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - "vasp-build/**"
-      - ".github/workflows/docker_build.yml"
-  pull_request:
-    branches:  [ main ]
-    paths:
-      - "vasp-build/**"
-      - ".github/workflows/docker_build.yml"
   workflow_dispatch:
 
 jobs:

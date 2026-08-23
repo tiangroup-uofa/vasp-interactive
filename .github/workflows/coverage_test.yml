@@ -2,13 +2,8 @@
 # All python unittests should be relatively fast (1 core + gam)
 name: Code coverage test
 
+# Legacy licensed-binary coverage workflow. Manual dispatch only.
 on:
-  push:
-    branches: [ main ]
-    paths-ignore:
-      - '**.md'
-      - 'examples/**'
-      - 'tutorials/**'
   workflow_dispatch:
 
 jobs:
