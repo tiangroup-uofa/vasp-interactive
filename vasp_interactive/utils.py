@@ -1,7 +1,10 @@
 import time
 import os
 import sys
-import psutil
+try:
+    import psutil
+except ImportError:  # Optional process-control capability (e.g. WASM).
+    psutil = None
 import signal
 import re
 import numpy as np
@@ -67,24 +70,53 @@ def _find_mpi_process(pid, mpi_program="mpirun", vasp_program="vasp_std"):
 
     If srun is found as the process, need to use `scancel` to pause / resume the job step
     """
-    allowed_names = set(["mpirun", "mpiexec", "orterun", "oshrun", "shmemrun"])
+    allowed_names = set([
+        "mpirun",
+        "mpiexec",
+        "orterun",
+        "prterun",
+        "prte",
+        "oshrun",
+        "shmemrun",
+    ])
     allowed_vasp_names = set(["vasp_std", "vasp_gam", "vasp_ncl"])
+
+    def is_vasp_process(process):
+        try:
+            name = process.name()
+        except psutil.Error:
+            return False
+        return name in allowed_vasp_names or name.startswith("vasp.")
+
     if mpi_program:
         allowed_names.add(mpi_program)
     if vasp_program:
         allowed_vasp_names.add(vasp_program)
+    if psutil is None:
+        warn(
+            "psutil is not installed; MPI process pausing is unavailable. "
+            "Install vasp-interactive[mpi-control] for MPI pause/resume support."
+        )
+        return {"type": None, "process": None}
+
     try:
-        process_list = [psutil.Process(pid)]
+        root_process = psutil.Process(pid)
+        process_list = [root_process]
+        process_list.extend(root_process.children(recursive=True))
     except psutil.NoSuchProcess:
         warn("Psutil cannot locate the pid. Your VASP program seems already exited.")
-        match = {"type": None, "process": None}
-        return match
+        return {"type": None, "process": None}
+    except psutil.Error as exc:
+        warn(f"Psutil could not inspect the VASP process tree: {exc}")
+        return {"type": None, "process": None}
 
-    process_list.extend(process_list[0].children(recursive=True))
     mpi_candidates = []
     match = {"type": None, "process": None}
     for proc in process_list:
-        name = proc.name()
+        try:
+            name = proc.name()
+        except psutil.Error:
+            continue
         if name in ["srun"]:
             # TODO: after the slurm parts get mature the warning can be removed
             warn(
@@ -94,12 +126,13 @@ def _find_mpi_process(pid, mpi_program="mpirun", vasp_program="vasp_std"):
             match["type"] = "slurm"
             match["process"] = _locate_slurm_step(vasp_program=vasp_program)
             break
-        elif proc.name() in allowed_names:
-            # is the mpi process's direct children are vasp_std?
-            children = proc.children()
-            if len(children) > 0:
-                if children[0].name() in allowed_vasp_names:
-                    mpi_candidates.append(proc)
+        elif name in allowed_names:
+            try:
+                children = proc.children(recursive=True)
+            except psutil.Error:
+                continue
+            if any(is_vasp_process(child) for child in children):
+                mpi_candidates.append(proc)
     if len(mpi_candidates) > 1:
         warn(
             "More than 1 mpi processes are created. This may be a bug. I'll use the last one"

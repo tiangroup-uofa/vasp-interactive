@@ -8,7 +8,7 @@
 > be added as a separate, controlled workflow.
 
 ## Unit test actions involved
-- `mock_unit_tests.yml`: package installation and protocol tests with a mock VASP process; no VASP binary or POTCAR is required.
+- `mock_unit_tests.yml`: package installation plus protocol and MPI-process tests with mock VASP/process trees; no VASP binary or POTCAR is required.
 - `package_and_unittest.yml`, `patch_test.yml`, and `coverage_test.yml`: legacy licensed-binary workflows, manual dispatch only.
 - `send_job_slurm.yaml`: legacy manual NERSC job submission workflow.
 - `*_status.yaml`: legacy manual status actions for historical Slurm jobs.

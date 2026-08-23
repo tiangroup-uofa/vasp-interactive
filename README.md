@@ -19,6 +19,10 @@ It can be used both as a file I/O calculator and to communicate with an external
 pip install git+https://github.com/ulissigroup/vasp-interactive.git
 ```
 
+Normal installations include `psutil` for MPI process pause/resume and cleanup. In
+WASM environments, where `psutil` is unavailable, the package can still be
+imported and used for VASP I/O; ordinary MPI pause/resume is then disabled.
+
 After [setting proper environmental variables](https://databases.fysik.dtu.dk/ase/ase/calculators/vasp.html#environment-variables) 
 (e.g. `$VASP_COMMAND`, `$VASP_PP_PATH`, etc.),
 download the script and run the compatibility test with your local VASP setup:
@@ -91,18 +95,18 @@ The following scheme summarizes the mechanism of `VaspInteractive`.
 
 `VaspInteractive` invokes the interactive VASP mode by setting the keyword `INTERACTIVE = .TRUE.` in INCAR file.
 Under this mode, at the end of each ionic step, VASP writes a force block and waits for input. Legacy VASP builds use:
-
-For VASP 6.4.1 and newer, the native interactive reader uses a POSCAR-like
-record when `ISIF >= 3`. `VaspInteractive` detects its
-`POSITIONS AND LATTICE: reading from stdin` prompt and sends the updated
-lattice and positions together. These VASP versions therefore do not require
-the optional lattice-input source patch.
 ```
 FORCES:
    <Nx3> forces on atoms
    <one line for free energy, energy at T=0 K, and energy difference>
 POSITIONS: reading from stdin
 ```
+
+For VASP 6.4.1 and newer, the native interactive reader uses a POSCAR-like
+record when `ISIF >= 3`. `VaspInteractive` detects its
+`POSITIONS AND LATTICE: reading from stdin` prompt and sends the updated
+lattice and positions together. These VASP versions therefore do not require
+the optional lattice-input source patch.
 and waits for user input of the scaled positions. After reading the user-input coordinates ($N \times 3$), 
 VASP performs the next ionic step using previous density and wavefunction **in memory**.  
 In this way, the interactive mode reduces the number of electronic self-consistent cycles compared with
@@ -232,7 +236,7 @@ do_some_cpu_intensive_calculation()
 
 **Notes**
 [^2]: The MPI process pause/resume has been tested on OpenMPI > 1.3.0. For some systems you may need to explicitly add the flag `--mca orte_forward_job_control 1`.
-[^3]: If your VASP commands are run by SLURM job manager's `srun` command, the signal is sent by `scancel` utility instead of forwarding to `mpirun` directly. Make sure you have access to these utilities in your environment.
+[^3]: If your VASP commands are run by SLURM job manager's `srun` command, the signal is sent by `scancel` utility instead of forwarding to `mpirun` directly. Make sure you have access to these utilities in your environment. Slurm control does not require the Python `psutil` module; other MPI launchers do.
 [^4]: Each pause/resume cycle adds an overhead of 0.5 ~ 5 s depending on your system load.
 
 
@@ -362,6 +366,7 @@ If you want to specify the source of your results on each ionic step, consider u
 - [examples/ex05_rattle_atoms.py](examples/ex05_rattle_atoms.py): Apply `VaspInteractive` to sequence of structures (same formula, different positions)
 - [examples/ex06_benchmark.py](examples/ex06_benchmark.py) and [examples/ex07_benchmark.py](examples/ex07_benchmark.py): Running benchmark. You can delete `examples/benchmark.pkl` and `examples/benchmark-large.pkl` if you want to re-run the calculations (may take up to a few hours).
 - [examples/ex08_dask_par.py](examples/ex08_dask_par.py): Simple example running parallel relaxation jobs using Dask. See `examples/ex08_sample_output.txt` for an example of output.
+- [examples/ex18_vasp642_socket_lbfgs.py](examples/ex18_vasp642_socket_lbfgs.py): H20-validated VASP 6.4.2 fixed-cell ASE socket/LBFGS acceptance example; see [docs/vasp642_socket_fixed_cell.md](docs/vasp642_socket_fixed_cell.md).
 <!-- - [examples/ex10_mlp_online.py](examples/ex10_mlp_online.py): Example with online machine learning potential (`al_mlp` + `amptorch`).
  -->
  
