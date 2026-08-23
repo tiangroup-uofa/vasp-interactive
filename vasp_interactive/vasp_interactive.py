@@ -229,6 +229,12 @@ class VaspInteractive(Vasp):
         self._xml_complete = None
         self._outcar_complete = None
 
+        # VASP 6.4+ uses a POSCAR-like stdin protocol when ISIF >= 3.
+        # The protocol is detected from VASP's prompt so patched legacy
+        # binaries remain supported without hard-coding a version cutoff.
+        self._interactive_protocol = None
+        self._pending_stdout = None
+
         input_params = dict(
             label=label,
             command=command,
@@ -391,6 +397,8 @@ class VaspInteractive(Vasp):
         Return of the function ensures self.process is not None
         """
         if self.process is None:
+            self._interactive_protocol = None
+            self._pending_stdout = None
             # Delete STOPCAR left by an unsuccessful run
             stopcar = self._indir("STOPCAR")
             if os.path.isfile(stopcar):
@@ -446,51 +454,109 @@ class VaspInteractive(Vasp):
                 )
         return
 
-    def _write_atoms_stdin(self, atoms, out, require_cell_stdin):
-        """Helper function to write input positions / cell in _run().
-        This function adapts to different VASP compilations.
-        """
-        self._stdout("Inputting positions...\n", out=out)
-        # ase atoms --> self.sort --> write to position for VASP
-        # use scaled positions wrap back to cell
+    def _read_stdout_line(self, out=None):
+        """Read one VASP stdout line, preserving a line already inspected."""
+        if self._pending_stdout is not None:
+            text = self._pending_stdout
+            self._pending_stdout = None
+            return text
+        text = self.process.stdout.readline()
+        self._stdout(text, out=out)
+        return text
+
+    def _read_until_stdout(self, marker, out=None):
+        """Read stdout until an interactive-mode marker is observed."""
+        while True:
+            text = self._read_stdout_line(out=out)
+            if marker in text:
+                return text
+            if text == "" and self.process.poll() is not None:
+                raise RuntimeError(
+                    f"VASP exited before writing the expected marker {marker!r}."
+                )
+
+    def _atom_counts_for_stdin(self, atoms):
+        """Return atom counts in the ordering used by VASP's POSCAR reader."""
+        symbol_count = getattr(self, "symbol_count", None)
+        if symbol_count:
+            return [int(count) for _, count in symbol_count]
+
+        # This fallback is useful for direct unit tests that do not call
+        # Vasp.write_input() first.  Normal calculations use symbol_count,
+        # which also handles ASE special setups correctly.
+        sort = getattr(self, "sort", list(range(len(atoms))))
+        symbols = [atoms[index].symbol for index in sort]
+        counts = []
+        previous = None
+        for symbol in symbols:
+            if symbol != previous:
+                counts.append(1)
+                previous = symbol
+            else:
+                counts[-1] += 1
+        return counts
+
+    def _write_full_poscar_stdin(self, atoms, out):
+        """Write the POSCAR-like record expected by VASP 6.4+ ``INPOS``."""
+        self._stdout("Inputting positions and lattice...\n", out=out)
+        self._stdin("VaspInteractive", out=None)
+        self._stdin("1.0", out=None)
+        for vec in atoms.cell:
+            self._stdin(" ".join(map("{:19.16f}".format, vec)), out=None)
+        self._stdin(
+            " ".join(str(count) for count in self._atom_counts_for_stdin(atoms)),
+            out=None,
+        )
+        self._stdin("Direct", out=None)
         for atom in atoms.get_scaled_positions()[self.sort]:
             self._stdin(" ".join(map("{:19.16f}".format, atom)), out=None)
-        # INPOS subroutine does not split the positions, so manually write into vasp.out
-        self._stdout("New scaled positions\n", out=out)
-        for i in range(len(atoms)):
-            self._stdout(self.process.stdout.readline(), out=out)
-        self._stdout("Old scaled positions\n", out=out)
-        for i in range(len(atoms)):
-            self._stdout(self.process.stdout.readline(), out=out)
 
-        # An additional line "POSITIONS: read from stdin"
-        text = self.process.stdout.readline()
-        self._stdout(text, out=out)
-        assert "POSITIONS: read from stdin" in text
+        self._read_until_stdout(
+            "POSITIONS AND LATTICE: read from stdin", out=out
+        )
 
-        # Determine if lattice input is needed
-        text = self.process.stdout.readline()
-        self._stdout(text, out=out)
+    def _write_atoms_stdin(self, atoms, out, require_cell_stdin):
+        """Write the input record required by the active VASP protocol.
+
+        VASP <= 6.3 and patched legacy builds read positions first and may
+        expose a separate lattice prompt.  VASP 6.4+ reads a complete POSCAR
+        record when ``ISIF >= 3`` (which VaspInteractive enforces).
+        """
+        if self._interactive_protocol == "poscar":
+            self._write_full_poscar_stdin(atoms, out=out)
+            return
+
+        if self._interactive_protocol != "positions":
+            raise RuntimeError(
+                "Cannot determine VASP's interactive stdin protocol from its prompt."
+            )
+
+        self._stdout("Inputting positions...\n", out=out)
+        for atom in atoms.get_scaled_positions()[self.sort]:
+            self._stdin(" ".join(map("{:19.16f}".format, atom)), out=None)
+
+        # Legacy INPOS implementations may echo positions, while newer
+        # versions do not.  Reading to the completion marker handles both.
+        self._read_until_stdout("POSITIONS: read from stdin", out=out)
+
+        # A patched legacy binary calls INLATT after INPOS.  Inspect the next
+        # line without losing it when this is an unpatched binary continuing
+        # directly into the next electronic step.
+        text = self._read_stdout_line(out=out)
         if "LATTICE: reading from stdin" in text:
             for vec in atoms.cell:
                 self._stdin(" ".join(map("{:19.16f}".format, vec)), out=None)
-            # Finish the lattice vector outputs. Note there can be multiple empty lines
-            # In total, there should be 9 lines before the closing sentence
-            count = 0
-            while count < (2 * 3 + 3):
-                text = self.process.stdout.readline()
-                self._stdout(text, out=out)
-                if len(text.strip()) != 0:
-                    count += 1
-            assert "LATTICE: read from stdin" in text
-        elif require_cell_stdin:
-            # Cannot continue if cell change is required but VASP does not support
-            raise RuntimeError(
-                (
-                    "The unit cell changes in your calculation but VASP does not support writing lattice parameters to stdin. "
-                    "Please consider applying this patch https://github.com/ulissigroup/vasp-interactive first."
+            self._read_until_stdout("LATTICE: read from stdin", out=out)
+        else:
+            self._pending_stdout = text
+            if require_cell_stdin:
+                raise RuntimeError(
+                    (
+                        "The unit cell changes in your calculation but this VASP "
+                        "binary does not expose lattice input on stdin. Please use "
+                        "a VASP 6.4+ binary or apply the legacy interactive patch."
+                    )
                 )
-            )
         return
 
     def _run(self, atoms, out, require_cell_stdin):
@@ -514,11 +580,17 @@ class VaspInteractive(Vasp):
                 atoms=atoms, out=out, require_cell_stdin=require_cell_stdin
             )
 
-        # 3. Start read cycle until the current ionic step
-        #    finishes by "POSITIONS: reading from stdin"
+        # 3. Start read cycle until the current ionic step finishes by
+        #    requesting the next positions/lattice record.
         while self.process.poll() is None:
-            text = self.process.stdout.readline()
-            self._stdout(text, out=out)
+            text = self._read_stdout_line(out=out)
+            is_prompt = False
+            if "POSITIONS AND LATTICE: reading from stdin" in text:
+                self._interactive_protocol = "poscar"
+                is_prompt = True
+            elif "POSITIONS: reading from stdin" in text:
+                self._interactive_protocol = "positions"
+                is_prompt = True
             # Read vasp version from stdio, warn user of VASP5 issue
             if self._read_vasp_version_stream(text):
                 if _int_version(self.version) < 6:
@@ -529,7 +601,7 @@ class VaspInteractive(Vasp):
                             "If you encounter similar error messages, try using VASP 6.x or apply our patch if possible."
                         )
                     )
-            if "POSITIONS: reading from stdin" in text:
+            if is_prompt:
                 return
 
         # 4. VASP process exits. Check if everything's running ok
@@ -742,10 +814,9 @@ class VaspInteractive(Vasp):
                     )
                 )
 
-        # Does the VASP interactive mode needs to take cell as inputs?
-        # If require_cell_stdin is True, _run must get a "LATTICE: reading from stdin" line
-        # after sending in the positions, otherwise throws NotImplementedError
-        # Otherwise, sending cell to stdin is optional
+        # Does the VASP interactive mode need to take cell as input? Native
+        # VASP 6.4+ consumes the cell as part of its full POSCAR record;
+        # patched legacy binaries expose a separate lattice prompt.
         if ("cell" in system_changes) and (self.process is not None):
             require_cell_stdin = True
         else:
@@ -983,12 +1054,12 @@ class VaspInteractive(Vasp):
         return cpu_time, wall_time
 
     def _read_vasp_version_stream(self, line):
-        """Read vasp version from streamed output lines"""
-        if " vasp." in line:
-            self.version = line[len(" vasp.") :].split()[0]
+        """Read a VASP version from a streamed output line."""
+        match = re.search(r"\bvasp\.([^\s]+)", line, flags=re.IGNORECASE)
+        if match:
+            self.version = match.group(1)
             return True
-        else:
-            return False
+        return False
 
     def finalize(self):
         """Stop the stream calculator and finalize"""
@@ -1040,6 +1111,8 @@ class VaspInteractive(Vasp):
         # Reset process tracker
         self.process = None
         self.pid = None
+        self._interactive_protocol = None
+        self._pending_stdout = None
         if hasattr(self, "mpi_match"):
             self.mpi_match = None
             self.mpi_state = None

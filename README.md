@@ -99,7 +99,13 @@ The following scheme summarizes the mechanism of `VaspInteractive`.
 
 
 `VaspInteractive` invokes the interactive VASP mode by setting the keyword `INTERACTIVE = .TRUE.` in INCAR file.
-Under this mode, at the end of each ionic step, VASP writes the following blocks to the standard output
+Under this mode, at the end of each ionic step, VASP writes a force block and waits for input. Legacy VASP builds use:
+
+For VASP 6.4.1 and newer, the native interactive reader uses a POSCAR-like
+record when `ISIF >= 3`. `VaspInteractive` detects its
+`POSITIONS AND LATTICE: reading from stdin` prompt and sends the updated
+lattice and positions together. These VASP versions therefore do not require
+the optional lattice-input source patch.
 ```
 FORCES:
    <Nx3> forces on atoms
@@ -130,7 +136,7 @@ However, there are several things to note:
 
 Most of the issues come from the way the original VASP code is written. 
 
-- `VaspInteractive` supports only positional change due to limitations of the original VASP source code. Users can choose our custom patch to add support for lattice change (see [advanced topics](#enhanced-interactive-mode-by-patching-vasp-source-codes) for details).
+- Legacy VASP builds support only positional changes unless users apply our custom lattice-input patch. VASP 6.4.1+ has native lattice input, which `VaspInteractive` supports directly (see [advanced topics](#enhanced-interactive-mode-by-patching-vasp-source-codes) for the optional patch).
 - An additional ionic step (with 1 electronic step) will be added to the end of the calculation as a result of STOPCAR 
 - Compatibility with VASP depends on the version and how the compilation method. More details see [**Troubleshooting**](#troubleshooting) section.
 
