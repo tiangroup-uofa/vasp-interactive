@@ -102,6 +102,8 @@ jobs:
             src: ghcr.io/${{ env.REPO_OWNER_LC }}/vasp-interactive:runtime
             dst: ghcr.io/${{ env.REPO_OWNER_LC }}/vasp-interactive:runtime-hpcsdk21.2-cuda11.2-20.04
   test:
+    # Licensed VASP binary tests run only on trusted/manual workflows.
+    if: github.event_name != 'pull_request'
     needs: [runtime,]
     runs-on: ubuntu-latest
     container:
