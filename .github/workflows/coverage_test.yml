@@ -9,8 +9,6 @@ on:
       - '**.md'
       - 'examples/**'
       - 'tutorials/**'
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
