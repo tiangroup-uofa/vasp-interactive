@@ -180,6 +180,9 @@ class VaspInteractive(Vasp):
         # self.pid tracks if pid changes (useful for stopping slurm jobs)
         self.process = None
         self.pid = None
+        # True once a VASP version has been parsed from the output stream of
+        # the current process; reset whenever a new process is launched.
+        self._version_from_stream = False
         self.process_controller = None
         self.allow_restart_process = allow_restart_process
 
@@ -412,6 +415,7 @@ class VaspInteractive(Vasp):
             self._stdout("Starting VASP for initial step...\n", out=out)
             # Dynamic generation of command args
             command = self.make_command(self._vasp_command)
+            self._version_from_stream = False
             self.process = Popen(
                 command,
                 shell=True,
@@ -1079,10 +1083,23 @@ class VaspInteractive(Vasp):
         return cpu_time, wall_time
 
     def _read_vasp_version_stream(self, line):
-        """Read a VASP version from a streamed output line."""
-        match = re.search(r"\bvasp\.([^\s]+)", line, flags=re.IGNORECASE)
+        """Read a VASP version from a streamed output line.
+
+        Only the first successful parse for a given VASP process is kept. This
+        method is called for every line VASP writes, so without the guard a
+        later line can silently overwrite an already correct version.
+
+        The version must begin with a digit. VASP prints documentation links
+        such as ``https://www.vasp.at/wiki/index.php/NCORE`` in its
+        performance-advice banners, and a looser pattern matches inside
+        ``www.vasp.at`` and captures ``at/wiki/index.php/NCORE``.
+        """
+        if self._version_from_stream:
+            return False
+        match = re.search(r"\bvasp\.(\d[^\s]*)", line, flags=re.IGNORECASE)
         if match:
             self.version = match.group(1)
+            self._version_from_stream = True
             return True
         return False
 
